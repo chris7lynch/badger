@@ -4,7 +4,7 @@ This directory contains assets for the badge app, including the LinkedIn QR code
 
 ## Quick Start
 
-1. **Set your LinkedIn URL** in `/badge/secrets.py`:
+1. **Set your LinkedIn URL** in `badge/secrets.py` (at the root of the repository):
    ```python
    LINKEDIN_URL = "https://www.linkedin.com/in/your-profile/"
    ```
@@ -64,7 +64,7 @@ The QR code will appear in the **bottom-right corner** of the badge display when
 ## Troubleshooting
 
 **QR code not appearing on badge:**
-- Verify `LINKEDIN_URL` is set in `/secrets.py` (not `/badge/secrets.py`)
+- Verify `LINKEDIN_URL` is set in `badge/secrets.py` (at the root of the badge directory)
 - Check that `linkedin_qr.png` exists in `/system/apps/badge/assets/`
 - Ensure the image is a valid PNG file
 - Try regenerating the QR code

@@ -21,6 +21,10 @@ faded = brushes.color(235, 245, 255, 100)
 small_font = PixelFont.load("/system/assets/fonts/ark.ppf")
 large_font = PixelFont.load("/system/assets/fonts/absolute.ppf")
 
+# QR code colors - green on black to match the new theme
+qr_green = brushes.color(86, 211, 100)  # Green color for QR code
+qr_black = brushes.color(0, 0, 0)       # Black background for QR code
+
 WIFI_TIMEOUT = 60
 CONTRIB_URL = "https://github.com/{user}.contribs"
 USER_AVATAR = "https://wsrv.nl/?url=https://github.com/{user}.png&w=75&output=png"
@@ -28,6 +32,7 @@ DETAILS_URL = "https://api.github.com/users/{user}"
 
 WIFI_PASSWORD = None
 WIFI_SSID = None
+LINKEDIN_PROFILE_URL = None
 
 wlan = None
 connected = False
@@ -46,12 +51,13 @@ def get_connection_details(user):
 
     try:
         sys.path.insert(0, "/")
-        from secrets import WIFI_PASSWORD, WIFI_SSID, GITHUB_USERNAME
+        from secrets import WIFI_PASSWORD, WIFI_SSID, GITHUB_USERNAME, LINKEDIN_PROFILE_URL
         sys.path.pop(0)
     except ImportError:
         WIFI_PASSWORD = None
         WIFI_SSID = None
         GITHUB_USERNAME = None
+        LINKEDIN_PROFILE_URL = None
 
     if not WIFI_SSID:
         return False
@@ -60,8 +66,41 @@ def get_connection_details(user):
         return False
 
     user.handle = GITHUB_USERNAME
+    user.linkedin_url = LINKEDIN_PROFILE_URL
 
     return True
+
+
+def shorten_url(long_url):
+    """Shorten URL using tinyurl.com service, fallback to original URL"""
+    if not long_url:
+        return None
+    
+    try:
+        # TinyURL API endpoint
+        api_url = f"http://tinyurl.com/api-create.php?url={long_url}"
+        response = urlopen(api_url, headers={"User-Agent": "GitHub Universe Badge 2025"})
+        
+        # Read response
+        data = bytearray(256)
+        short_url = ""
+        while True:
+            length = response.readinto(data)
+            if length == 0:
+                break
+            short_url += data[:length].decode('utf-8')
+        
+        # Validate response (TinyURL returns the shortened URL directly)
+        if short_url.startswith('http') and len(short_url) < len(long_url):
+            message(f"URL shortened: {short_url}")
+            return short_url.strip()
+        else:
+            message("URL shortening failed, using original")
+            return long_url
+            
+    except Exception as e:
+        message(f"URL shortener error: {e}, using original")
+        return long_url
 
 
 def wlan_start():
@@ -197,6 +236,33 @@ def get_avatar(user, force_update=False):
     user.avatar = Image.load("/avatar.png")
 
 
+def get_short_linkedin_url(user):
+    """Shorten the LinkedIn URL for better QR code readability"""
+    if not user.linkedin_url:
+        return
+    
+    message("Shortening LinkedIn URL...")
+    try:
+        user.short_linkedin_url = shorten_url(user.linkedin_url)
+    except Exception as e:
+        message(f"URL shortening failed: {e}")
+        user.short_linkedin_url = user.linkedin_url
+
+
+def get_qr_code_data(user):
+    """Load pre-generated LinkedIn QR code image"""
+    message("Loading LinkedIn QR code...")
+    try:
+        user.qr_image = load_qr_code_image()
+        if user.qr_image:
+            message("LinkedIn QR code loaded successfully")
+        else:
+            message("Failed to load QR code image")
+    except Exception as e:
+        message(f"QR loading failed: {e}")
+        user.qr_image = None
+
+
 def fake_number():
     return random.randint(10000, 99999)
 
@@ -214,6 +280,17 @@ def placeholder_if_none(text):
     return text
 
 
+def load_qr_code_image():
+    """Load the pre-generated LinkedIn QR code image"""
+    try:
+        qr_image = Image.load("/system/assets/linkedin_qr_65x65.png")
+        message("Loaded pre-generated LinkedIn QR code")
+        return qr_image
+    except Exception as e:
+        message(f"Failed to load QR image: {e}")
+        return None
+
+
 class User:
     levels = [
         brushes.color(21 / 2,  27 / 2,  35 / 2),
@@ -225,6 +302,9 @@ class User:
 
     def __init__(self):
         self.handle = None
+        self.linkedin_url = None
+        self.short_linkedin_url = None
+        self.qr_image = None
         self.update()
 
     def update(self, force_update=False):
@@ -237,63 +317,65 @@ class User:
         self._task = None
         self._force_update = force_update
 
-    def draw_stat(self, title, value, x, y):
-        screen.brush = white if value else faded
-        screen.font = large_font
-        screen.text(str(value) if value is not None else str(fake_number()), x, y)
+    def draw_qr_code(self, x, y):
+        """Draw pre-generated LinkedIn QR code image"""
+        if not self.qr_image:
+            return  # No QR code image loaded
+        
+        # Draw the 65x65 QR code image directly
+        screen.blit(self.qr_image, x, y)
+        
+        # Add "LinkedIn" label below QR code in small white font (matching name style)
         screen.font = small_font
-        screen.brush = phosphor
-        screen.text(title, x - 1, y + 13)
+        screen.brush = white
+        label_text = "LinkedIn"
+        label_w, _ = screen.measure_text(label_text)
+        # Center the label under the QR code (65px image size)
+        label_x = x + (65 - label_w) // 2
+        label_y = y + 65 + 3
+        screen.text(label_text, label_x, label_y)
 
     def draw(self, connected):
-        # draw contribution graph background
-        size = 15
-        graph_width = 53 * (size + 2)
-        xo = int(-math.sin(io.ticks / 5000) *
-                 ((graph_width - 160) / 2)) + ((graph_width - 160) / 2)
-
-        screen.font = small_font
-        rect = shapes.rounded_rectangle(0, 0, size, size, 2)
-        for y in range(7):
-            for x in range(53):
-                if self.contribution_data:
-                    level = self.contribution_data[y][x]
-                    screen.brush = User.levels[level]
-                else:
-                    screen.brush = User.levels[1]
-                pos = (x * (size + 2) - xo, y * (size + 2) + 1)
-                if pos[0] + size < 0 or pos[0] > 160:
-                    # skip tiles that aren't in view
-                    continue
-                rect.transform = Matrix().translate(*pos)
-                screen.draw(rect)
+        # Draw QR code beside profile image and under the name
+        # Position: x=85 (beside 75px image + 5px margin), y=30 (under name with margin)
+        # Size: 63x63 pixels fits safely in available 75x90 space
+        self.draw_qr_code(85, 30)
 
         # draw handle
         screen.font = large_font
         handle = self.handle
 
         # use the handle area to show loading progress if not everything is ready
-        if (not self.handle or not self.avatar or not self.contribs) and connected:
+        if (not self.handle or not self.avatar or 
+            (self.linkedin_url and not self.short_linkedin_url) or
+            (self.linkedin_url and not self.qr_image)) and connected:
             if not self.name:
                 handle = "fetching user data..."
                 if not self._task:
                     self._task = get_user_data(self, self._force_update)
-            elif not self.contribs:
-                handle = "fetching contribs..."
-                if not self._task:
-                    self._task = get_contrib_data(self, self._force_update)
-            else:
+            elif not self.avatar:
                 handle = "fetching avatar..."
                 if not self._task:
                     self._task = get_avatar(self, self._force_update)
+            elif self.linkedin_url and not self.short_linkedin_url:
+                handle = "shortening LinkedIn URL..."
+                if not self._task:
+                    get_short_linkedin_url(self)  # This is synchronous, no yield needed
+                    self._task = None  # Mark as complete
+            elif self.linkedin_url and not self.qr_image:
+                handle = "loading QR code..."
+                if not self._task:
+                    get_qr_code_data(self)  # This is synchronous, no yield needed
+                    self._task = None  # Mark as complete
 
-            try:
-                next(self._task)
-            except StopIteration:
-                self._task = None
-            except:
-                self._task = None
-                handle = "fetch error"
+            if self._task:  # Only call next if there's actually a task
+                try:
+                    next(self._task)
+                except StopIteration:
+                    self._task = None
+                except:
+                    self._task = None
+                    handle = "fetch error"
 
         if not connected:
             handle = "connecting..."
@@ -309,10 +391,7 @@ class User:
         w, _ = screen.measure_text(name)
         screen.text(name, 80 - (w / 2), 16)
 
-        # draw statistics
-        self.draw_stat("followers", self.followers, 88, 33)
-        self.draw_stat("contribs", self.contribs, 88, 62)
-        self.draw_stat("repos", self.repos, 88, 91)
+        # QR code is drawn above in the draw method
 
         # draw avatar imagee
         if not self.avatar:
@@ -330,7 +409,7 @@ class User:
 
 
 user = User()
-connected = file_exists("/contrib_data.json") and file_exists("/user_data.json") and file_exists("/avatar.png")
+connected = file_exists("/user_data.json") and file_exists("/avatar.png")
 force_update = False
 
 

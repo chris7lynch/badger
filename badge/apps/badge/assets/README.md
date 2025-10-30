@@ -4,7 +4,7 @@ This directory contains assets for the badge app, including the LinkedIn QR code
 
 ## Quick Start
 
-1. **Set your LinkedIn URL** in `badge/secrets.py` (at the root of the repository):
+1. **Set your LinkedIn URL** in `badge/secrets.py` (at the root of the badge directory):
    ```python
    LINKEDIN_URL = "https://www.linkedin.com/in/your-profile/"
    ```

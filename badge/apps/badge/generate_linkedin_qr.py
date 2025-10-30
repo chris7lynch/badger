@@ -15,6 +15,8 @@ from PIL import Image
 import os
 import sys
 import argparse
+import urllib.request
+import urllib.parse
 
 
 def shorten_url(long_url):
@@ -31,8 +33,6 @@ def shorten_url(long_url):
         return None
     
     try:
-        import urllib.request
-        import urllib.parse
         # Use TinyURL API (free, no auth required)
         api_url = f"https://tinyurl.com/api-create.php?url={urllib.parse.quote(long_url)}"
         with urllib.request.urlopen(api_url) as response:

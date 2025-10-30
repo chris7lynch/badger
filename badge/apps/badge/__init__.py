@@ -33,9 +33,7 @@ LINKEDIN_URL = None
 wlan = None
 connected = False
 ticks_start = None
-qr_code = None
-qr_size = 0
-shortened_url = None
+qr_image = None  # Pre-generated QR code image
 
 
 def message(text):
@@ -202,49 +200,28 @@ def get_avatar(user, force_update=False):
     user.avatar = Image.load("/avatar.png")
 
 
-def async_shorten_and_generate_qr():
+def load_linkedin_qr():
     """
-    Asynchronously shorten the LinkedIn URL and generate QR code.
-    This is a generator to avoid blocking the UI.
+    Load the pre-generated LinkedIn QR code image.
+    This should be called once when the badge starts up.
     """
-    global shortened_url, qr_code, qr_size, LINKEDIN_URL
+    global qr_image, LINKEDIN_URL
     
     if not LINKEDIN_URL:
+        message("No LinkedIn URL configured in secrets.py")
         return
     
-    # Import QR utilities
     try:
-        from qr_utils import shorten_url, generate_qr_image, QRCode
-    except ImportError:
-        message("QR utilities not available")
-        return
-    
-    # Shorten URL
-    message("Shortening LinkedIn URL...")
-    yield
-    try:
-        shortened_url = shorten_url(LINKEDIN_URL)
-        message(f"Shortened URL: {shortened_url}")
+        from qr_utils import load_qr_code
+        qr_image = load_qr_code()
+        if qr_image:
+            message("LinkedIn QR code loaded successfully")
+        else:
+            message("LinkedIn QR code image not found - generate it using generate_linkedin_qr.py")
+    except ImportError as e:
+        message(f"QR utilities not available: {e}")
     except Exception as e:
-        message(f"URL shortening failed: {e}")
-        shortened_url = LINKEDIN_URL
-    
-    yield
-    
-    # Generate QR code
-    message("Generating QR code...")
-    yield
-    try:
-        # Use higher error correction (H) for better scanning on color displays
-        qr_code, qr_size = generate_qr_image(shortened_url, QRCode.ERROR_CORRECT_H)
-        message(f"QR code generated: {qr_size}x{qr_size}")
-    except Exception as e:
-        message(f"QR generation failed: {e}")
-        qr_code = None
-        qr_size = 0
-    
-    yield
-    gc.collect()
+        message(f"Error loading QR code: {e}")
 
 
 def fake_number():
@@ -383,40 +360,31 @@ class User:
     
     def draw_qr_code(self):
         """Draw LinkedIn QR code in bottom right corner"""
-        global qr_code, qr_size
+        global qr_image
         
-        if not qr_code or qr_size == 0:
+        if not qr_image:
             return
         
         # Position QR code in bottom right corner with some padding
-        # Screen is 160x120, QR codes are typically 21-29 modules
-        # Scale up for visibility: use 2 pixels per module
-        pixel_size = 2
-        qr_display_size = qr_size * pixel_size
+        # QR code image is 60x60 pixels by default
+        qr_width = qr_image.width
+        qr_height = qr_image.height
         
         # Position with 2 pixel padding from edges
-        x_offset = 160 - qr_display_size - 2
-        y_offset = 120 - qr_display_size - 2
+        # Screen is 160x120
+        x_offset = 160 - qr_width - 2
+        y_offset = 120 - qr_height - 2
         
-        # Draw white background for QR code
-        screen.brush = brushes.color(255, 255, 255)
-        screen.draw(shapes.rectangle(x_offset - 1, y_offset - 1, 
-                                     qr_display_size + 2, qr_display_size + 2))
-        
-        # Draw QR code modules
-        screen.brush = brushes.color(0, 0, 0)
-        for y in range(qr_size):
-            for x in range(qr_size):
-                if qr_code.get_module(x, y):
-                    px = x_offset + (x * pixel_size)
-                    py = y_offset + (y * pixel_size)
-                    screen.draw(shapes.rectangle(px, py, pixel_size, pixel_size))
+        # Blit the QR code image to the screen
+        try:
+            screen.blit(qr_image, x_offset, y_offset)
+        except Exception as e:
+            message(f"Error drawing QR code: {e}")
 
 
 user = User()
 connected = file_exists("/contrib_data.json") and file_exists("/user_data.json") and file_exists("/avatar.png")
 force_update = False
-qr_task = None  # Task for async QR code generation
 
 
 def center_text(text, y):
@@ -470,7 +438,7 @@ def connection_error():
 
 
 def update():
-    global connected, force_update, qr_task, qr_code, shortened_url
+    global connected, force_update, qr_image
 
     screen.brush = brushes.color(0, 0, 0)
     screen.draw(shapes.rectangle(0, 0, 160, 120))
@@ -480,27 +448,13 @@ def update():
     if io.BUTTON_A in io.held and io.BUTTON_C in io.held:
         connected = False
         user.update(True)
-        # Reset QR code on force update
-        qr_code = None
-        shortened_url = None
-        qr_task = None
 
     if get_connection_details(user):
+        # Load QR code on first successful connection details retrieval
+        if LINKEDIN_URL and qr_image is None:
+            load_linkedin_qr()
+        
         if wlan_start():
-            # Start QR code generation task if not started and LinkedIn URL is available
-            if LINKEDIN_URL and qr_task is None and qr_code is None:
-                qr_task = async_shorten_and_generate_qr()
-            
-            # Continue QR code generation task
-            if qr_task is not None:
-                try:
-                    next(qr_task)
-                except StopIteration:
-                    qr_task = None
-                except Exception as e:
-                    message(f"QR task error: {e}")
-                    qr_task = None
-            
             user.draw(connected)
         else:  # Connection Failed
             connection_error()

@@ -28,10 +28,12 @@ DETAILS_URL = "https://api.github.com/users/{user}"
 
 WIFI_PASSWORD = None
 WIFI_SSID = None
+LINKEDIN_URL = None
 
 wlan = None
 connected = False
 ticks_start = None
+qr_image = None  # Pre-generated QR code image
 
 
 def message(text):
@@ -39,19 +41,20 @@ def message(text):
 
 
 def get_connection_details(user):
-    global WIFI_PASSWORD, WIFI_SSID
+    global WIFI_PASSWORD, WIFI_SSID, LINKEDIN_URL
 
     if WIFI_SSID is not None and user.handle is not None:
         return True
 
     try:
         sys.path.insert(0, "/")
-        from secrets import WIFI_PASSWORD, WIFI_SSID, GITHUB_USERNAME
+        from secrets import WIFI_PASSWORD, WIFI_SSID, GITHUB_USERNAME, LINKEDIN_URL
         sys.path.pop(0)
     except ImportError:
         WIFI_PASSWORD = None
         WIFI_SSID = None
         GITHUB_USERNAME = None
+        LINKEDIN_URL = None
 
     if not WIFI_SSID:
         return False
@@ -197,6 +200,30 @@ def get_avatar(user, force_update=False):
     user.avatar = Image.load("/avatar.png")
 
 
+def load_linkedin_qr():
+    """
+    Load the pre-generated LinkedIn QR code image.
+    This should be called once when the badge starts up.
+    """
+    global qr_image, LINKEDIN_URL
+    
+    if not LINKEDIN_URL:
+        message("No LinkedIn URL configured in secrets.py")
+        return
+    
+    try:
+        from qr_utils import load_qr_code
+        qr_image = load_qr_code()
+        if qr_image:
+            message("LinkedIn QR code loaded successfully")
+        else:
+            message("LinkedIn QR code image not found - generate it using generate_linkedin_qr.py")
+    except ImportError as e:
+        message(f"QR utilities not available: {e}")
+    except Exception as e:
+        message(f"Error loading QR code: {e}")
+
+
 def fake_number():
     return random.randint(10000, 99999)
 
@@ -327,6 +354,32 @@ class User:
                 screen.draw(squircle)
         else:
             screen.blit(self.avatar, 5, 37)
+        
+        # draw LinkedIn QR code if available
+        self.draw_qr_code()
+    
+    def draw_qr_code(self):
+        """Draw LinkedIn QR code in bottom right corner"""
+        global qr_image
+        
+        if not qr_image:
+            return
+        
+        # Position QR code in bottom right corner with some padding
+        # QR code image is 60x60 pixels by default
+        qr_width = qr_image.width
+        qr_height = qr_image.height
+        
+        # Position with 2 pixel padding from edges
+        # Screen is 160x120
+        x_offset = 160 - qr_width - 2
+        y_offset = 120 - qr_height - 2
+        
+        # Blit the QR code image to the screen
+        try:
+            screen.blit(qr_image, x_offset, y_offset)
+        except Exception as e:
+            message(f"Error drawing QR code: {e}")
 
 
 user = User()
@@ -385,7 +438,7 @@ def connection_error():
 
 
 def update():
-    global connected, force_update
+    global connected, force_update, qr_image
 
     screen.brush = brushes.color(0, 0, 0)
     screen.draw(shapes.rectangle(0, 0, 160, 120))
@@ -397,6 +450,10 @@ def update():
         user.update(True)
 
     if get_connection_details(user):
+        # Load QR code on first successful connection details retrieval
+        if LINKEDIN_URL and qr_image is None:
+            load_linkedin_qr()
+        
         if wlan_start():
             user.draw(connected)
         else:  # Connection Failed

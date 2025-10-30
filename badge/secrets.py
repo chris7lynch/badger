@@ -6,3 +6,7 @@ WIFI_PASSWORD = "h4ck4w4y"
 
 # Update with your GitHub username
 GITHUB_USERNAME = ""
+
+# Update with your LinkedIn profile URL
+# This will be shortened and converted to a QR code on the badge
+LINKEDIN_URL = ""
